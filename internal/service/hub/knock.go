@@ -2,10 +2,6 @@ package hub
 
 import (
 	"fmt"
-	"math/big"
-	"net/http"
-	"time"
-
 	"github.com/brucexc/pray-to-earn/internal/service/hub/model/errorx"
 	"github.com/creasty/defaults"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -13,6 +9,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
+	"math/big"
+	"net/http"
+	"time"
 )
 
 type KnockRequest struct {
@@ -53,10 +52,10 @@ func (h *Hub) Knock(c echo.Context) error {
 		return errorx.ValidationFailedError(c, fmt.Errorf("validation failed: %w", err))
 	}
 
-	mintTokens := big.NewInt(1)
+	mintTokens := big.NewInt(1).Mul(big.NewInt(1e18), big.NewInt(1))
 	var otherNote string
 	if request.Note != "" {
-		mintTokens = big.NewInt(5)
+		mintTokens = big.NewInt(5).Mul(big.NewInt(1e18), big.NewInt(1))
 
 		h.redisClient.SAdd(c.Request().Context(), notesSet, request.Note)
 		otherNote, _ = h.redisClient.SRandMember(c.Request().Context(), notesSet).Result()
