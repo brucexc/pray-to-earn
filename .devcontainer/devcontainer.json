@@ -1,0 +1,13 @@
+{
+  "name": "pray",
+  "dockerComposeFile": "docker-compose.yaml",
+  "service": "devcontainer",
+  "runServices": [
+    "postgres"
+  ],
+  "workspaceFolder": "/workspace/${localWorkspaceFolderBasename}",
+  "forwardPorts": [
+    "postgres:8080",
+    "postgres:5432"
+  ]
+}

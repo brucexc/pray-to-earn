@@ -1,0 +1,12 @@
+environment: development
+
+database:
+  uri: postgres://postgres:password@localhost:5433/pray-to-earn
+
+redis:
+  uri: redis://localhost:6379/0
+
+rss3_chain:
+  endpoint: https://rpc.testnet.rss3.io
+
+admin_key:
