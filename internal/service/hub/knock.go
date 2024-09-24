@@ -2,6 +2,7 @@ package hub
 
 import (
 	"fmt"
+	"github.com/brucexc/pray-to-earn/contract"
 	"github.com/brucexc/pray-to-earn/internal/service/hub/model/errorx"
 	"github.com/creasty/defaults"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -27,6 +28,15 @@ type KnockResponse struct {
 	Note string `json:"note"`
 }
 
+type PeekNoteRequest struct {
+	Address common.Address `json:"address" validate:"required"`
+	TxHash  common.Hash    `json:"tx_hash" validate:"required"`
+}
+
+type PeekNoteResponse struct {
+	Note string `json:"note"`
+}
+
 type Note struct {
 	Time    time.Time      `json:"time"`
 	Address common.Address `json:"address"`
@@ -34,6 +44,9 @@ type Note struct {
 }
 
 const notesSet = "notes_set"
+
+var zeroAddress = common.HexToAddress("0x0000000000000000000000000000000000000000")
+var peekNodePrice = big.NewInt(1).Mul(big.NewInt(1e18), big.NewInt(10))
 
 func (h *Hub) Knock(c echo.Context) error {
 	var request KnockRequest
@@ -78,6 +91,64 @@ func (h *Hub) Knock(c echo.Context) error {
 	return c.JSON(http.StatusOK, Response{
 		Data: KnockResponse{
 			Note: otherNote,
+		},
+	})
+}
+
+func (h *Hub) PeekNote(c echo.Context) error {
+	var request PeekNoteRequest
+
+	if err := c.Bind(&request); err != nil {
+		return errorx.BadParamsError(c, fmt.Errorf("bind request: %w", err))
+	}
+
+	if err := defaults.Set(&request); err != nil {
+		zap.L().Error("set default values for request", zap.Error(err))
+
+		return errorx.InternalError(c)
+	}
+
+	if err := c.Validate(&request); err != nil {
+		return errorx.ValidationFailedError(c, fmt.Errorf("validation failed: %w", err))
+	}
+
+	zap.L().Info("peek note", zap.String("tx_hash", request.TxHash.Hex()), zap.String("address", request.Address.Hex()))
+	// get transaction receipt by tx_hash
+	receipt, err := h.ethereumClient.TransactionReceipt(c.Request().Context(), request.TxHash)
+	if err != nil {
+		return errorx.ValidationFailedError(c, fmt.Errorf("get transaction receipt: %w", err))
+	}
+
+	found := false
+	for _, log := range receipt.Logs {
+		// check if log is a burn log
+		if log.Address == contract.AddressPray && log.Topics[0] == contract.TransferEventSig {
+			from := common.HexToAddress(log.Topics[1].Hex())
+			to := common.HexToAddress(log.Topics[2].Hex())
+			amount := new(big.Int).SetBytes(log.Data)
+
+			if from == request.Address && to == zeroAddress && amount.Cmp(peekNodePrice) == 0 {
+				zap.L().Info("found payment", zap.Any("from", from), zap.Any("to", to), zap.Any("amount", amount))
+
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		return errorx.BadPaymentError(c, fmt.Errorf("payment not found"))
+	}
+
+	// get a random note from the notes set
+	note, err := h.redisClient.SRandMember(c.Request().Context(), notesSet).Result()
+	if err != nil {
+		zap.L().Error("failed to get a random note", zap.Error(err))
+		return errorx.InternalError(c)
+	}
+
+	return c.JSON(http.StatusOK, Response{
+		Data: PeekNoteResponse{
+			Note: note,
 		},
 	})
 }

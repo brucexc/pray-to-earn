@@ -15,6 +15,7 @@ const (
 	ErrorCodeValidationFailed
 	ErrorCodeBadParams
 	ErrorCodeInternalError
+	ErrorCodeBadPayment
 )
 
 type ErrorResponse struct {
@@ -43,6 +44,14 @@ func BadParamsError(c echo.Context, err error) error {
 	return c.JSON(http.StatusBadRequest, &ErrorResponse{
 		ErrorCode: ErrorCodeBadParams,
 		Error:     "Invalid parameter combination. Verify the combination and try again.",
+		Details:   fmt.Sprintf("%v", err),
+	})
+}
+
+func BadPaymentError(c echo.Context, err error) error {
+	return c.JSON(http.StatusBadRequest, &ErrorResponse{
+		ErrorCode: ErrorCodeBadPayment,
+		Error:     "Invalid payment.",
 		Details:   fmt.Sprintf("%v", err),
 	})
 }
