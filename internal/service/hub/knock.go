@@ -52,10 +52,10 @@ func (h *Hub) Knock(c echo.Context) error {
 		return errorx.ValidationFailedError(c, fmt.Errorf("validation failed: %w", err))
 	}
 
-	mintTokens := big.NewInt(1).Mul(big.NewInt(1e18), big.NewInt(1))
+	mintTokens := big.NewInt(1e18)
 	var otherNote string
 	if request.Note != "" {
-		mintTokens = big.NewInt(5).Mul(big.NewInt(1e18), big.NewInt(1))
+		mintTokens = big.NewInt(1).Mul(big.NewInt(1e18), big.NewInt(5))
 
 		h.redisClient.SAdd(c.Request().Context(), notesSet, request.Note)
 		otherNote, _ = h.redisClient.SRandMember(c.Request().Context(), notesSet).Result()
