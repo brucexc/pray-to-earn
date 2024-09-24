@@ -30,20 +30,11 @@ type KnockResponse struct {
 }
 
 type PeekNoteRequest struct {
-	common.Address `json:"address" validate:"required"`
-	TxHash         common.Hash `json:"tx_hash" validate:"required"`
+	Address common.Address `json:"address" validate:"required"`
+	TxHash  common.Hash    `json:"tx_hash" validate:"required"`
 }
 
 type PeekNoteResponse struct {
-	Note string `json:"note"`
-}
-
-type ReplyRequest struct {
-	Address common.Address `json:"address" validate:"required"`
-	Note    string         `json:"note" validate:"required"`
-}
-
-type ReplyResponse struct {
 	Note string `json:"note"`
 }
 
