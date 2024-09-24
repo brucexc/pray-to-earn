@@ -38,6 +38,14 @@ type PeekNoteResponse struct {
 	Note string `json:"note"`
 }
 
+type FaucetRequest struct {
+	Address common.Address `json:"address" validate:"required"`
+}
+
+type FaucetResponse struct {
+	Success bool `json:"success"`
+}
+
 type Note struct {
 	Time    time.Time      `json:"time"`
 	Address common.Address `json:"address"`
@@ -48,6 +56,7 @@ const notesSet = "notes_set"
 
 var zeroAddress = common.HexToAddress("0x0000000000000000000000000000000000000000")
 var peekNodePrice = big.NewInt(1).Mul(big.NewInt(1e18), big.NewInt(10))
+var serverAdminAddress = common.HexToAddress("0xBd7537Df4991ef4ABc245e48989C5beE6A56fC61")
 
 func (h *Hub) Knock(c echo.Context) error {
 	var request KnockRequest
@@ -129,6 +138,47 @@ func (h *Hub) PeekNote(c echo.Context) error {
 	return c.JSON(http.StatusOK, Response{
 		Data: PeekNoteResponse{
 			Note: note,
+		},
+	})
+}
+
+func (h *Hub) Faucet(c echo.Context) error {
+	var request FaucetRequest
+
+	if err := c.Bind(&request); err != nil {
+		return errorx.BadParamsError(c, fmt.Errorf("bind request: %w", err))
+	}
+
+	if err := defaults.Set(&request); err != nil {
+		zap.L().Error("set default values for request", zap.Error(err))
+		return errorx.InternalError(c)
+	}
+
+	if err := c.Validate(&request); err != nil {
+		return errorx.ValidationFailedError(c, fmt.Errorf("validation failed: %w", err))
+	}
+
+	zap.L().Info("send 0.5 RSS3 to", zap.String("address", request.Address.Hex()))
+
+	// send 0.5 ether to request.Address, use h.auth.Signer to sign the transaction
+	nonce, _ := h.ethereumClient.NonceAt(c.Request().Context(), serverAdminAddress, nil)
+	gasPrice, _ := h.ethereumClient.SuggestGasPrice(c.Request().Context())
+	sendTx, err := h.auth.Signer(h.auth.From, types.NewTransaction(nonce, request.Address, big.NewInt(5e17), 21000, gasPrice, nil))
+	if err != nil {
+		zap.L().Error("failed to sign transaction", zap.Error(err))
+		return errorx.InternalError(c)
+	}
+
+	zap.L().Info("send 0.5 rss3 to ", zap.String("address", request.Address.Hex()), zap.String("tx_hash", sendTx.Hash().Hex()))
+
+	if err := h.ethereumClient.SendTransaction(c.Request().Context(), sendTx); err != nil {
+		zap.L().Error("failed to send transaction", zap.Error(err))
+		return errorx.InternalError(c)
+	}
+
+	return c.JSON(http.StatusOK, Response{
+		Data: FaucetResponse{
+			Success: true,
 		},
 	})
 }

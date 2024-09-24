@@ -56,6 +56,7 @@ func NewServer(conf *config.File, ethereumClient *ethclient.Client, redisClient 
 	{
 		nodes.POST("/knock", instance.hub.Knock)
 		nodes.POST("/peekNote", instance.hub.PeekNote)
+		nodes.POST("/faucet", instance.hub.Faucet)
 	}
 
 	return &instance, nil
