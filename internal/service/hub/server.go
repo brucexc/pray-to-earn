@@ -3,8 +3,9 @@ package hub
 import (
 	"context"
 	"fmt"
-	"github.com/redis/go-redis/v9"
 	"net"
+
+	"github.com/redis/go-redis/v9"
 
 	"github.com/brucexc/pray-to-earn/internal/config"
 	"github.com/brucexc/pray-to-earn/internal/service"

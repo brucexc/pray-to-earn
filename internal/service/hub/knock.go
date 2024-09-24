@@ -2,6 +2,10 @@ package hub
 
 import (
 	"fmt"
+	"math/big"
+	"net/http"
+	"time"
+
 	"github.com/brucexc/pray-to-earn/contract"
 	"github.com/brucexc/pray-to-earn/internal/service/hub/model/errorx"
 	"github.com/creasty/defaults"
@@ -10,9 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
-	"math/big"
-	"net/http"
-	"time"
 )
 
 type KnockRequest struct {
@@ -29,11 +30,20 @@ type KnockResponse struct {
 }
 
 type PeekNoteRequest struct {
-	Address common.Address `json:"address" validate:"required"`
-	TxHash  common.Hash    `json:"tx_hash" validate:"required"`
+	common.Address `json:"address" validate:"required"`
+	TxHash         common.Hash `json:"tx_hash" validate:"required"`
 }
 
 type PeekNoteResponse struct {
+	Note string `json:"note"`
+}
+
+type ReplyRequest struct {
+	Address common.Address `json:"address" validate:"required"`
+	Note    string         `json:"note" validate:"required"`
+}
+
+type ReplyResponse struct {
 	Note string `json:"note"`
 }
 
@@ -113,30 +123,9 @@ func (h *Hub) PeekNote(c echo.Context) error {
 	}
 
 	zap.L().Info("peek note", zap.String("tx_hash", request.TxHash.Hex()), zap.String("address", request.Address.Hex()))
-	// get transaction receipt by tx_hash
-	receipt, err := h.ethereumClient.TransactionReceipt(c.Request().Context(), request.TxHash)
-	if err != nil {
-		return errorx.ValidationFailedError(c, fmt.Errorf("get transaction receipt: %w", err))
-	}
 
-	found := false
-	for _, log := range receipt.Logs {
-		// check if log is a burn log
-		if log.Address == contract.AddressPray && log.Topics[0] == contract.TransferEventSig {
-			from := common.HexToAddress(log.Topics[1].Hex())
-			to := common.HexToAddress(log.Topics[2].Hex())
-			amount := new(big.Int).SetBytes(log.Data)
-
-			if from == request.Address && to == zeroAddress && amount.Cmp(peekNodePrice) == 0 {
-				zap.L().Info("found payment", zap.Any("from", from), zap.Any("to", to), zap.Any("amount", amount))
-
-				found = true
-				break
-			}
-		}
-	}
-	if !found {
-		return errorx.BadPaymentError(c, fmt.Errorf("payment not found"))
+	if err := h.verifyTxPayment(c, request); err != nil {
+		return err
 	}
 
 	// get a random note from the notes set
@@ -151,4 +140,26 @@ func (h *Hub) PeekNote(c echo.Context) error {
 			Note: note,
 		},
 	})
+}
+
+func (h *Hub) verifyTxPayment(c echo.Context, request PeekNoteRequest) error {
+	receipt, err := h.ethereumClient.TransactionReceipt(c.Request().Context(), request.TxHash)
+	if err != nil {
+		return errorx.ValidationFailedError(c, fmt.Errorf("get transaction receipt: %w", err))
+	}
+
+	// check if the transaction is a burn transaction
+	for _, log := range receipt.Logs {
+		if log.Address == contract.AddressPray && log.Topics[0] == contract.TransferEventSig {
+			from := common.HexToAddress(log.Topics[1].Hex())
+			to := common.HexToAddress(log.Topics[2].Hex())
+			amount := new(big.Int).SetBytes(log.Data)
+
+			if from == request.Address && to == zeroAddress && amount.Cmp(peekNodePrice) == 0 {
+				zap.L().Info("found payment", zap.Any("from", from), zap.Any("to", to), zap.Any("amount", amount))
+				return nil
+			}
+		}
+	}
+	return errorx.BadPaymentError(c, fmt.Errorf("payment not found"))
 }
