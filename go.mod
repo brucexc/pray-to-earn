@@ -8,6 +8,7 @@ require (
 	github.com/creasty/defaults v1.8.0
 	github.com/ethereum/go-ethereum v1.14.9
 	github.com/go-playground/validator/v10 v10.22.1
+	github.com/google/uuid v1.6.0
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/pressly/goose/v3 v3.22.1
 	github.com/redis/go-redis/v9 v9.6.1
@@ -42,7 +43,6 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/holiman/uint256 v1.3.1 // indirect

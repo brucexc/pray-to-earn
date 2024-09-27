@@ -9,4 +9,4 @@ redis:
 rss3_chain:
   endpoint: https://rpc.testnet.rss3.io
 
-admin_key:
+admin_key: 

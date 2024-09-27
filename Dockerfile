@@ -20,6 +20,8 @@ FROM ghcr.io/rss3-network/go-image/go-runtime AS runner
 WORKDIR /root/pray
 
 COPY --from=builder /root/pray/main ./pray
+RUN mkdir -p deploy
+COPY deploy/config.yaml /root/pray/deploy/config.yaml
 
 EXPOSE 80
 ENTRYPOINT ["./pray"]

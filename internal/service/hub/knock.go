@@ -1,8 +1,14 @@
 package hub
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"math/big"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -21,12 +27,26 @@ type KnockRequest struct {
 	Note    string         `json:"note"`
 }
 
+type ReplyRequest struct {
+	ID      string         `json:"id" validate:"required"`
+	Note    string         `json:"note" validate:"required"`
+	Address common.Address `json:"address" validate:"required"`
+}
+
 type Response struct {
 	Data any `json:"data"`
 }
 
 type KnockResponse struct {
-	Note string `json:"note"`
+	TotalTokens *big.Int `json:"total_tokens"`
+	AddTokens   *big.Int `json:"add_tokens"`
+	Note        *Message `json:"note"`
+}
+
+type Message struct {
+	ID      string   `json:"id"`
+	Content string   `json:"content"`
+	Replies []string `json:"replies"`
 }
 
 type PeekNoteRequest struct {
@@ -35,7 +55,7 @@ type PeekNoteRequest struct {
 }
 
 type PeekNoteResponse struct {
-	Note string `json:"note"`
+	Note *Message `json:"note"`
 }
 
 type FaucetRequest struct {
@@ -43,16 +63,11 @@ type FaucetRequest struct {
 }
 
 type FaucetResponse struct {
-	Success bool `json:"success"`
+	Success bool        `json:"success"`
+	TxHash  common.Hash `json:"tx_hash" validate:"required"`
 }
 
-type Note struct {
-	Time    time.Time      `json:"time"`
-	Address common.Address `json:"address"`
-	Note    string         `json:"note"`
-}
-
-const notesSet = "notes_set"
+const messagesSet = "messages_set"
 
 var zeroAddress = common.HexToAddress("0x0000000000000000000000000000000000000000")
 var peekNodePrice = big.NewInt(1).Mul(big.NewInt(1e18), big.NewInt(10))
@@ -75,13 +90,21 @@ func (h *Hub) Knock(c echo.Context) error {
 		return errorx.ValidationFailedError(c, fmt.Errorf("validation failed: %w", err))
 	}
 
-	mintTokens := big.NewInt(1e18)
-	var otherNote string
-	if request.Note != "" {
-		mintTokens = big.NewInt(1).Mul(big.NewInt(1e18), big.NewInt(5))
+	// rate limit
+	success, err := h.redisClient.SetNX(c.Request().Context(), request.Address.String(), 1, 5*time.Second).Result()
+	if err != nil || !success {
+		return errorx.TooManyRequestError(c, fmt.Errorf("too many requests"))
+	}
 
-		h.redisClient.SAdd(c.Request().Context(), notesSet, request.Note)
-		otherNote, _ = h.redisClient.SRandMember(c.Request().Context(), notesSet).Result()
+	mintTokens := big.NewInt(1e18)
+	var otherNote *Message
+	if request.Note != "" {
+		// mint 5-10 tokens
+		mintTokens = big.NewInt(1).Mul(big.NewInt(1e18), big.NewInt(int64(rand.New(rand.NewSource(time.Now().UnixNano())).Intn(6)+5)))
+
+		storeNote := fmt.Sprintf("%s %s: %s", time.Now().Format("2006-01-02 15:04:05"), request.Address.Hex()[:8], request.Note)
+		_, _ = h.storeMessage(c.Request().Context(), storeNote)
+		otherNote, _ = h.getRandomMessage(c.Request().Context())
 	}
 
 	tx, err := h.prayContract.Mint(h.auth, request.Address, mintTokens)
@@ -94,15 +117,125 @@ func (h *Hub) Knock(c echo.Context) error {
 		return errorx.InternalError(c)
 	}
 
+	totalTokens, _ := h.prayContract.BalanceOf(&bind.CallOpts{}, request.Address)
+
 	zap.L().Info("minted tokens", zap.String("to", request.Address.Hex()), zap.Any("quantity", mintTokens),
 		zap.String("tx_hash", tx.Hash().Hex()),
-		zap.String("note", request.Note), zap.String("other_note", otherNote))
+		zap.String("note", request.Note), zap.Any("other_note", otherNote))
 
 	return c.JSON(http.StatusOK, Response{
 		Data: KnockResponse{
-			Note: otherNote,
+			TotalTokens: totalTokens,
+			AddTokens:   mintTokens,
+			Note:        otherNote,
 		},
 	})
+}
+
+func (h *Hub) Reply(c echo.Context) error {
+	var request ReplyRequest
+
+	if err := c.Bind(&request); err != nil {
+		return errorx.BadParamsError(c, fmt.Errorf("bind request: %w", err))
+	}
+
+	if err := defaults.Set(&request); err != nil {
+		zap.L().Error("set default values for request", zap.Error(err))
+
+		return errorx.InternalError(c)
+	}
+
+	if err := c.Validate(&request); err != nil {
+		return errorx.ValidationFailedError(c, fmt.Errorf("validation failed: %w", err))
+	}
+
+	storeNote := fmt.Sprintf("%s %s: %s", time.Now().Format("2006-01-02 15:04:05"), request.Address.Hex()[:8], request.Note)
+	_, _ = h.addReplyToMessage(c.Request().Context(), request.ID, storeNote)
+
+	zap.L().Info("replied to note", zap.String("id", request.ID), zap.String("note", request.Note))
+
+	return c.JSON(http.StatusOK, Response{
+		Data: "ok",
+	})
+}
+
+func (h *Hub) storeMessage(ctx context.Context, content string) (*Message, error) {
+	messageID := uuid.New().String()
+	message := &Message{
+		ID:      messageID,
+		Content: content,
+		Replies: []string{},
+	}
+
+	messageJSON, err := json.Marshal(message)
+	if err != nil {
+		return nil, err
+	}
+
+	messageKey := fmt.Sprintf("message:%s", messageID)
+	err = h.redisClient.Set(ctx, messageKey, messageJSON, 0).Err()
+	if err != nil {
+		return nil, err
+	}
+
+	err = h.redisClient.SAdd(ctx, "messages_set", messageID).Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return message, nil
+}
+
+func (h *Hub) getRandomMessage(ctx context.Context) (*Message, error) {
+	messageID, err := h.redisClient.SRandMember(ctx, messagesSet).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, fmt.Errorf("no messgae found")
+		}
+		return nil, err
+	}
+
+	messageKey := fmt.Sprintf("message:%s", messageID)
+	messageJSON, err := h.redisClient.Get(ctx, messageKey).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var message Message
+	err = json.Unmarshal([]byte(messageJSON), &message)
+	if err != nil {
+		return nil, err
+	}
+
+	return &message, nil
+}
+
+func (h *Hub) addReplyToMessage(ctx context.Context, messageID string, reply string) (*Message, error) {
+	messageKey := fmt.Sprintf("message:%s", messageID)
+	messageJSON, err := h.redisClient.Get(ctx, messageKey).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var message Message
+	err = json.Unmarshal([]byte(messageJSON), &message)
+	if err != nil {
+		return nil, err
+	}
+
+	message.Replies = append(message.Replies, reply)
+
+	updatedMessageJSON, err := json.Marshal(message)
+	if err != nil {
+		return nil, err
+	}
+
+	err = h.redisClient.Set(ctx, messageKey, updatedMessageJSON, 0).Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return &message, nil
 }
 
 func (h *Hub) PeekNote(c echo.Context) error {
@@ -128,8 +261,7 @@ func (h *Hub) PeekNote(c echo.Context) error {
 		return err
 	}
 
-	// get a random note from the notes set
-	note, err := h.redisClient.SRandMember(c.Request().Context(), notesSet).Result()
+	otherNote, err := h.getRandomMessage(c.Request().Context())
 	if err != nil {
 		zap.L().Error("failed to get a random note", zap.Error(err))
 		return errorx.InternalError(c)
@@ -137,7 +269,7 @@ func (h *Hub) PeekNote(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, Response{
 		Data: PeekNoteResponse{
-			Note: note,
+			Note: otherNote,
 		},
 	})
 }
@@ -179,6 +311,7 @@ func (h *Hub) Faucet(c echo.Context) error {
 	return c.JSON(http.StatusOK, Response{
 		Data: FaucetResponse{
 			Success: true,
+			TxHash:  sendTx.Hash(),
 		},
 	})
 }

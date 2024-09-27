@@ -16,6 +16,7 @@ const (
 	ErrorCodeBadParams
 	ErrorCodeInternalError
 	ErrorCodeBadPayment
+	ErrorTooManyRequest
 )
 
 type ErrorResponse struct {
@@ -52,6 +53,14 @@ func BadPaymentError(c echo.Context, err error) error {
 	return c.JSON(http.StatusBadRequest, &ErrorResponse{
 		ErrorCode: ErrorCodeBadPayment,
 		Error:     "Invalid payment.",
+		Details:   fmt.Sprintf("%v", err),
+	})
+}
+
+func TooManyRequestError(c echo.Context, err error) error {
+	return c.JSON(http.StatusTooManyRequests, &ErrorResponse{
+		ErrorCode: ErrorTooManyRequest,
+		Error:     "Too Many Request.",
 		Details:   fmt.Sprintf("%v", err),
 	})
 }

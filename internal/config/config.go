@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"go.uber.org/zap"
 	"os"
 
 	"github.com/creasty/defaults"
@@ -49,6 +50,11 @@ func Setup(configFilePath string) (*File, error) {
 
 	if err := defaults.Set(&configFile); err != nil {
 		return nil, fmt.Errorf("set default values.yaml: %w", err)
+	}
+
+	if redisEnv, exists := os.LookupEnv("REDIS"); exists {
+		configFile.Redis.URI = redisEnv
+		zap.L().Info("use redis env", zap.String("uri", configFile.Redis.URI))
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())

@@ -55,6 +55,7 @@ func NewServer(conf *config.File, ethereumClient *ethclient.Client, redisClient 
 	nodes := instance.httpServer.Group("/pray")
 	{
 		nodes.POST("/knock", instance.hub.Knock)
+		nodes.POST("/reply", instance.hub.Reply)
 		nodes.POST("/peekNote", instance.hub.PeekNote)
 		nodes.POST("/faucet", instance.hub.Faucet)
 	}
